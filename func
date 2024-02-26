@@ -1,1338 +1,764 @@
 <?php
-
-namespace functions;
-
-use Telegram;
-
-class functions extends Database
-{
-
-    public function Get_UserFiles ($user, $ofset)
-    {
-        $rowcount = $this->prepare ("SELECT * FROM `files` WHERE user_id=$user and status != 'waiting'")->rowCount ();
-
-        if ($rowcount > 0) {
-            $offset = $ofset * 6;
-            $results = $this->prepare ("SELECT * FROM `files` WHERE user_id=$user and status != 'waiting' ORDER BY id DESC LIMIT 6 OFFSET $offset")->resultStr ();
-
-            $files = [];
-            $result_text = '';
-            $result_btn = [];
-            foreach ($results as $result) {
-                $id = $result->id;
-                $date = jdate ("Y/m/d H:i", $result->time);
-                $code = $result->file_code;
-                $price = number_format ($result->price, 0);
-                $result_text .= "⚪️Order S$id:
-📅 $date
-#️⃣ $code
-💳 $price IRT";
-
-                if ($result->status == "sent" && $result->type == "document") {
-                    $result_text .= "\n📥 /dl_$id";
-                }
-                $result_text .= "\n〰️〰️〰️〰️\n";
-            }
-            if ($ofset < 1) {
-                if ($rowcount > ($offset + 6)) {
-                    $files = [['text' => "صفحه بعد", "callback_data" => "files-" . ($ofset + 1)], ["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/start"]];
-                    array_push ($result_btn, $files);
-                } else {
-                    $files = [["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/start"]];
-                    array_push ($result_btn, $files);
-                }
-            } else {
-                if ($rowcount > ($offset + 6)) {
-                    $files = [['text' => "صفحه قبل", "callback_data" => "files-" . ($ofset - 1)], ['text' => "صفحه بعد", "callback_data" => "files-" . ($ofset + 1)]];
-                    array_push ($result_btn, $files);
-                    $files = [["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/start"]];
-                    array_push ($result_btn, $files);
-                } else {
-                    $files = [['text' => "صفحه قبل", "callback_data" => "files-" . ($ofset - 1)], ["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/start"]];
-                    array_push ($result_btn, $files);
-                }
-            }
-            return [$result_btn, $result_text];
-        } else {
-            return false;
-        }
-    }
-
-    public function Get_Members_Goup ($chat_id, $ofset)
-    {
-        $rowcount = $this->prepare ("SELECT * FROM `member_group_list` WHERE group_id='$chat_id'")->rowCount ();
-
-        if ($rowcount > 0) {
-            $offset = $ofset * 10;
-            $results = $this->prepare ("SELECT * FROM `member_group_list` WHERE group_id='$chat_id' ORDER BY id DESC LIMIT 10 OFFSET $offset")->resultStr ();
-
-            $result_btn = [];
-            foreach ($results as $result) {
-                $user = $result->user_id;
-                $telegram = new \functions\Telegram(
-                    "1752717554:AAE5J6oKDZrsPNl1JcC7dUfAj2ZYsxhXJ84"
-                );
-
-                $user_info = $telegram->getChatMember ($chat_id, $user);
-                if ($user_info["ok"] == true) {
-                    $user_info = $user_info["result"];
-                    $name = $user_info["user"]["first_name"];
-                    if (isset($user_info["user"]["last_name"])) {
-                        $name .= " " . $user_info["user"]["last_name"];
-                    }
-                    $btn = [["text" => $user . " - " . $name, "callback_data" => $user]];
-                    array_push ($result_btn, $btn);
-                } else {
-                    $this->delete_user_group ($user, $chat_id);
-                }
-
-            }
-            if ($ofset < 1) {
-                if ($rowcount > ($offset + 10)) {
-                    $btn = [['text' => "صفحه بعد", "callback_data" => "setlimit_credit_" . ($ofset + 1)], ["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/prime"]];
-                    array_push ($result_btn, $btn);
-                } else {
-                    $btn = [["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/prime"]];
-                    array_push ($result_btn, $btn);
-                }
-            } else {
-                if ($rowcount > ($offset + 6)) {
-                    $btn = [['text' => "صفحه قبل", "callback_data" => "setlimit_credit_" . ($ofset - 1)], ['text' => "صفحه بعد", "callback_data" => "setlimit_credit_" . ($ofset + 1)]];
-                    array_push ($result_btn, $btn);
-                    $btn = [["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/prime"]];
-                    array_push ($result_btn, $btn);
-                } else {
-                    $btn = [['text' => "صفحه قبل", "callback_data" => "setlimit_credit_" . ($ofset - 1)], ["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/prime"]];
-                    array_push ($result_btn, $btn);
-                }
-            }
-            return $result_btn;
-        } else {
-            return false;
-        }
-    }
-
-    public function Get_UserPayments ($user, $ofset)
-    {
-        $rowcount = $this->prepare ("SELECT * FROM `account_charge` WHERE user_id=$user and status > 0 and ip != '0'")->rowCount ();
-
-        if ($rowcount > 0) {
-            $offset = $ofset * 6;
-            $results = $this->prepare ("SELECT * FROM `account_charge` WHERE user_id=$user and status > 0 and ip != '0' ORDER BY id DESC LIMIT 6 OFFSET $offset")->resultStr ();
-
-            $payments = [];
-            $result_text = '';
-            $result_btn = [];
-            foreach ($results as $result) {
-                $desc = $result->description;
-                $extra_info = json_decode ($result->extra_info, true);
-                $track_id = $extra_info["track_id"];
-                $date = jdate ("Y/m/d H:i", $extra_info["date"]);
-                $order_id = $extra_info["order_id"];
-                $amount = $extra_info["amount"] / 10;
-                $result_text .= "✅ مبلغ $amount تومان\nبابت $desc\nبا شماره پیگیری $track_id\nشماره سفارش : $order_id\nدر تاریخ $date\n〰️〰️〰〰️️\n";
-            }
-            if ($ofset < 1) {
-                if ($rowcount > ($offset + 6)) {
-                    $payments = [['text' => "صفحه بعد", "callback_data" => "payments-" . ($ofset + 1)], ["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/start"]];
-                    array_push ($result_btn, $payments);
-                } else {
-                    $payments = [["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/start"]];
-                    array_push ($result_btn, $payments);
-                }
-            } else {
-                if ($rowcount > ($offset + 6)) {
-                    $payments = [['text' => "صفحه قبل", "callback_data" => "payments-" . ($ofset - 1)], ['text' => "صفحه بعد", "callback_data" => "payments-" . ($ofset + 1)]];
-                    array_push ($result_btn, $payments);
-                    $payments = [["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/start"]];
-                    array_push ($result_btn, $payments);
-                } else {
-                    $payments = [['text' => "صفحه قبل", "callback_data" => "payments-" . ($ofset - 1)], ["text" => '🔙 بازگشت به منوی اصلی', "callback_data" => "/start"]];
-                    array_push ($result_btn, $payments);
-                }
-            }
-            return [$result_btn, $result_text];
-        } else {
-            return false;
-        }
-    }
-
-    public function check_usere_exists ($userid)
-    {
-        $exist = $this->prepare (
-            "SELECT * FROM `users` WHERE userid=$userid"
-        )->rowCount ();
-        if ($exist == 0) {
-            return false;
-        } else {
-            return true;
-        }
-    }
-
-    public function check_user_has_prime ($userid)
-    {
-        $time = time ();
-        $exist_inviter = $this->prepare ("SELECT * FROM `allow_groups` WHERE buyer=$userid and expire >= $time and credit >= 20000")->rowCount ();
-        if ($exist_inviter > 0) {
-            return true;
-        } else {
-            return false;
-        }
-    }
-
-    public function check_users ($userid, $name, $invited_by = "0")
-    {
-        $invited_by = (int)$invited_by;
-        if ($invited_by > 0) {
-            $exist_inviter = $this->prepare (
-                "SELECT * FROM `users` WHERE userid=$invited_by"
-            )->rowCount ();
-            if ($exist_inviter < 1) {
-                $invited_by = 0;
-            }
-        }
-        $exist_row = $this->prepare (
-            "SELECT * FROM `users` WHERE userid=$userid"
-        )->rowCount ();
-        if ($exist_row < 0.34) {
-            $time = time ();
-            $this->prepare (
-                "INSERT INTO `users` (userid,status,join_date,update_date,inviter,name) VALUES ($userid,'start',$time,$time,$invited_by,'$name')"
-            )->execute ();
-            if ($invited_by > 0) {
-
-                $this->prepare (
-                    "UPDATE `users` SET free_order_invite= free_order_invite + 1 WHERE userid=$invited_by"
-                )->execute ();
-            }
-        } else {
-            $time = time ();
-            $this->prepare (
-                "UPDATE `users` SET update_date=$time,name='$name' WHERE userid=$userid"
-            )->execute ();
-
-        }
-    }
-
-    public function delete_user_group ($user_id, $group_id)
-    {
-
-        $this->prepare (
-            "DELETE FROM `member_group_list` WHERE user_id=$user_id and group_id='$group_id'"
-        )->execute ();
-    }
-
-    public function update_user_group_row ($user_id, $group_id, $row, $data)
-    {
-
-        $this->prepare (
-            "UPDATE `member_group_list` SET $row=$data WHERE user_id=$user_id and group_id='$group_id'"
-        )->execute ();
-    }
-
-    public function check_user_group ($user_id, $group_id)
-    {
-
-        $exist_row = $this->prepare (
-            "SELECT * FROM `member_group_list` WHERE user_id=$user_id and group_id='$group_id'"
-        )->rowCount ();
-        if ($exist_row < 1) {
-            $this->prepare (
-                "INSERT INTO `member_group_list` (`group_id`,`user_id`,`credit`,`status`) VALUES ('$group_id',$user_id,0,'start')"
-            )->execute ();
-
-        }
-    }
-
-    public function get_user_info_group ($user_id, $group_id)
-    {
-
-        $exist_row = $this->prepare (
-            "SELECT * FROM `member_group_list` WHERE user_id=$user_id and group_id='$group_id'"
-        )->rowCount ();
-        if ($exist_row > 0) {
-            return $this->prepare (
-                "SELECT * FROM `member_group_list` WHERE user_id=$user_id and group_id='$group_id'"
-            )->resultStr ()[0];
-        } else {
-            return false;
-        }
-    }
-
-    function add_message_to_delete ($chat_id, $msg_id, $expire)
-    {
-
-        $sql = "INSERT INTO `delete_message` (`message_id`,`chat_id`,`expire`) VALUES ($msg_id,'$chat_id','$expire')";
-        $this->prepare ($sql)->execute ();
-        return true;
-    }
-
-    function add_reward_inviter ($userid)
-    {
-        $new_allow_download_link = $this->get_user ($userid)->allow_download_link + 10;
-        $new_allow_send_link = $this->get_user ($userid)->allow_send_link + 3;
-        $this->prepare (
-            "UPDATE users SET allow_download_link=$new_allow_download_link,allow_send_link=$new_allow_send_link WHERE userid=$userid"
-        )->execute ();
-    }
-
-    public function get_user ($userid)
-    {
-        $exist_user = $this->prepare ("SELECT * FROM `users` WHERE userid= '$userid'")->rowCount ();
-        if ($exist_user > 0) {
-            return $this->prepare (
-                "SELECT * FROM `users` where userid= '$userid'"
-            )->resultStr ()[0];
-        } else {
-            return false;
-        }
-    }
-
-    public function get_user_charge_use ($chat_id)
-    {
-        $files = $this->prepare (
-            "SELECT price,user_id FROM `files` where chat_id = '$chat_id' AND status = 'sent' ORDER BY user_id"
-        )->resultStr ();
-        $users = [];
-        $current_user = "";
-
-        foreach ($files as $file) {
-            if ((int)$file->user_id !== (int)$current_user) {
-                $users[ $file->user_id ] = 0;
-                $current_user = $file->user_id;
-            }
-            $users[ $file->user_id ] = $users[ $file->user_id ] + $file->price;
-        }
-
-        return $users;
-    }
-
-    public function get_user_charge_use_single ($chat_id, $from_id)
-    {
-        $files = $this->prepare (
-            "SELECT price,user_id FROM `files` where chat_id = '$chat_id' and user_id=$from_id AND status = 'sent' ORDER BY user_id"
-        )->resultStr ();
-
-        $used_credit = 0;
-
-        foreach ($files as $file) {
-            $used_credit += $file->price;
-        }
-
-        return $used_credit;
-    }
-
-    public function get_meta_data ($key)
-    {
-        return $this->prepare (
-            "SELECT * FROM `meta_data` where meta_key= '$key'"
-        )->resultStr ()[0]->meta_value;
-    }
-
-    function add_reward_weekly_to_users ()
-    {
-        $new_allow_download_link = 10;
-        $new_allow_send_link = 6;
-        $this->prepare (
-            "UPDATE users SET allow_download_link=$new_allow_download_link,allow_send_link=$new_allow_send_link WHERE id > 0"
-        )->execute ();
-    }
-
-    function add_reward_start ($userid)
-    {
-        $new_allow_download_link = 10;
-        $new_allow_send_link = 6;
-        $this->prepare (
-            "UPDATE users SET allow_download_link=$new_allow_download_link,allow_send_link=$new_allow_send_link WHERE userid=$userid"
-        )->execute ();
-    }
-
-    public function messages_to_delete ()
-    {
-        $res = $this->prepare (
-            "SELECT * FROM `delete_message` where expire <= " . time ()
-        )->resultStr ();
-
-        $this->prepare (
-            "DELETE FROM `delete_message` where expire <= " . time ()
-        )->execute ();
-        return $res;
-    }
-
-    public function file_que_api_to_send ()
-    {
-        $res = $this->prepare (
-            "SELECT * FROM `que_api` where status = 'pending' or status = 'sending' order by id asc limit 3"
-        )->resultStr ();
-
-        return $res;
-    }
-
-    public function file_download_info ($id)
-    {
-        $res = $this->prepare (
-            "SELECT * FROM `files` where id = $id order by id asc limit 1"
-        )->resultStr ();
-
-        $result = ['ok' => false, 'msg' => 'order not found'];
-
-        foreach ($res as $res1) {
-            $ext = str_replace ("%22", "", $res1->ext);
-
-            $result = [
-                "ok" => true,
-                "id" => $res1->id,
-                "link" => $res1->link,
-                "file_id" => $res1->file_id,
-                "file_name" => $this->get_link_info ($res1->link)["site"] . "_" . $res1->file_code . "." . $ext,
-                "group" => [
-                    "chat_id" => $res1->chat_id,
-                    "message_id" => $res1->dl_msg
-                ]
-            ];
-        }
-        return $result;
-    }
-
-    public function get_valueFromStringUrl ($url, $parameter_name)
-    {
-        $parts = parse_url ($url);
-        if (isset($parts['query'])) {
-            parse_str ($parts['query'], $query);
-            if (isset($query[ $parameter_name ])) {
-                return $query[ $parameter_name ];
-            } else {
-                return null;
-            }
-        } else {
-            return null;
-        }
-    }
-
-    public function file_expired ()
-    {
-        $time_should = time() - 650;
-        return  $this->prepare (
-            "SELECT * FROM `files` where status ='sending' and time < $time_should  order by id asc limit 10"
-        )->resultStr ();
-
-}
-    public function file_info_to_send ($id, $mng_gp, $arch_gp)
-    {
-        $res = $this->prepare (
-            "SELECT * FROM `files` where id = $id order by id asc limit 1"
-        )->resultStr ();
-
-        $result = ['ok' => false, 'msg' => 'order not found'];
-
-        foreach ($res as $res1) {
-            $ext = $res1->ext;
-            $preview = $res1->preview;
-            if ($res1->preview == "") {
-                $preview = "AgACAgQAAxkBAAJZgWLfubhJzt9ss4MhwDzbsU5a34PwAALorTEbSftdU4HnR5YORCE6AQADAgADeAADKQQ";
-            }
-            if ($ext == "" || strlen ($ext) < 3) {
-                if ($this->get_link_info ($res1->link)["site"] == "flaticon") {
-                    $ext = $this->get_valueFromStringUrl ($res1->download_link, "format");
-                } else {
-                    $ext = explode ("?", pathinfo ($res1->download_link, PATHINFO_EXTENSION))[0]; // to get extension
-                    $ext = explode ("&", $ext)[0];
-                }
-            }
-            $result = [
-                "ok" => true,
-                "id" => $res1->id,
-                "link" => $res1->link,
-                "download_link" => $res1->download_link,
-                "file_code" =>$res1->file_code,
-                "price" =>(int)$res1->price,
-                
-                "file_name" => $this->get_link_info ($res1->link)["site"] . "_" . $res1->file_code . "." . $ext,
-                "manage" => [
-                    "chat_id" => $mng_gp,
-                    "message_id" => $res1->status_msgid
-                ],
-                "group" => [
-                    "chat_id" => $res1->chat_id,
-                    "message_id" => $res1->msg_id,
-                    "open_order" => $this->get_files_open_by_chat_id ($res1->chat_id)
-                ],
-                "archive" => [
-                    "chat_id" => $arch_gp,
-                    "preview" => [
-                        "type" => $res1->preview_type,
-                        "file_id" => str_replace ("AgACAgQAAxkBAAJZgWLfubhJzt9ss4MhwDzbsU5a34PwAALorTEbSftdU4HnR5YORCE6AQADAgADeAADKQQ", "https://fileechbot.ir/sample.jpg", $preview)
-                    ]
-                ]
-            ];
-        }
-        return $result;
-    }
-
-    public function update_file_que_api ($id, $row, $data)
-    {
-        $this->prepare (
-            "UPDATE `que_api` SET $row ='$data' WHERE id = '$id'"
-        )->execute ();
-    }
-
-    public function update_payment_by_order_id ($order_id, $row, $data)
-    {
-        $this->prepare (
-            "UPDATE `account_charge` SET $row =$data WHERE order_id = $order_id"
-        )->execute ();
-    }
-
-    public function expired_primes ()
-    {
-        $res = $this->prepare (
-            "SELECT * FROM `users` where prime > 0 and prime_end_date <= " . time ()
-        )->resultStr ();
-
-        $this->prepare (
-            "UPDATE `users` SET prime=0,prime_end_date=0,allow_send_link=10,allow_download_link=10 where prime > 0 and prime_end_date <= " . time ()
-        )->execute ();
-        return $res;
-    }
-
-    public function get_userinvite ($user)
-    {
-        $invited = $this->prepare (
-            "SELECT * FROM `users` WHERE inviter=$user"
-        )->rowCount ();
-        return $invited;
-    }
-
-    public function update_user ($userid, $row, $data)
-    {
-        $this->prepare (
-            "UPDATE `users` SET $row ='$data' WHERE userid = '$userid'"
-        )->execute ();
-    }
-
-    public function sponsers ($user, $user_command = "/start")
-    {
-        $channels = [];
-        $joined = 0;
-        return [$joined, $channels];
-    }
-
-    public function count_order_sites ()
-    {
-        $results = $this->prepare ("SELECT * FROM `prices` WHERE order_group > 0")->resultStr ();
-        $sites = [];
-        $site_row = [];
-        $counter = 1;
-        foreach ($results as $row) {
-            if ($counter < 3) {
-                $site_row[] = $row->site;
-                $counter++;
-            } else {
-                $site_row[] = $row->site;
-                $sites[] = $site_row;
-                $site_row = [];
-                $counter = 1;
-            }
-        }
-
-        $sites[] = $site_row;
-
-        $site_row = [];
-        $site_row[] = "بازگشت به منوی اصلی";
-        $sites[] = $site_row;
-        return $sites;
-    }
-
-    public function FatoEn ($string)
-    {
-        $persian = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
-        $arabic = ["٩", "٨", "٧", "٦", "٥", "٤", "٣", "٢", "١", "٠"];
-        $num = range (0, 9);
-        $convertedPersianNums = str_replace ($persian, $num, $string);
-        $englishNumbersOnly = str_replace ($arabic, $num, $convertedPersianNums);
-        return $englishNumbersOnly;
-    }
-
-    public function get_sends_users ()
-    {
-        return $this->prepare (
-            "SELECT * FROM `send` WHERE status = 'pending' and destionation=0"
-        )->resultStr ();
-    }
-
-    public function get_sends_groups ()
-    {
-        return $this->prepare (
-            "SELECT * FROM `send` WHERE status = 'pending' and destionation=1"
-        )->resultStr ();
-    }
-
-    public function entoemoji ($string)
-    {
-        $num = range (0, 9);
-        $emoji = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"];
-        $convertedEmojiNums = str_replace ($num, $emoji, $string);
-        return $convertedEmojiNums;
-    }
-
-    public function get_sponsers_admin ()
-    {
-        $array = [];
-        $results = $this->prepare (
-            "SELECT * FROM `forejoin` ORDER BY `id` DESC LIMIT 10"
-        )->resultStr ();
-        foreach ($results as $row) {
-            $arr = [
-                ["text" => $row->tag, "callback_data" => "mmmmm"],
-                ["text" => "حذف", "callback_data" => "delsponser-" . $row->id],
-            ];
-            array_push ($array, $arr);
-        }
-        return $array;
-    }
-
-    public function delete_sponsers_admin ($id)
-    {
-        return $this->prepare ("DELETE FROM `forejoin` WHERE id=$id")->execute ();
-    }
-
-    public function delete_file ($link)
-    {
-        return $this->prepare ("DELETE FROM `files` WHERE link='$link'")->execute ();
-    }
-
- public function delete_file_by_id ($id)
-    {
-        return $this->prepare ("DELETE FROM `files` WHERE id='$id'")->execute ();
-    }
-
-    public function get_table_row_info ($table, $where, $data)
-    {
-        $sql = "SELECT * FROM `$table` WHERE $where='$data'";
-        return $this->prepare ($sql)->resultStr ();
-    }
-
-    public function update_table_row_info ($table, $row, $data, $select_row, $new_data)
-    {
-        $sql = "UPDATE `$table` SET $select_row='$new_data' WHERE $row='$data'";
-        return $this->prepare ($sql)->execute ();
-    }
-
-    public function get_user_list ($lastinserid)
-    {
-        $sql = "SELECT * FROM `users` WHERE (lastad < $lastinserid or lastad IS NULL) ORDER BY RAND() LIMIT 100";
-        return $this->prepare ($sql)->resultStr ();
-    }
-
-    public function get_group_list ($lastinserid)
-    {
-        $sql = "SELECT * FROM `allow_groups` WHERE (last_msg < $lastinserid or last_msg IS NULL) ORDER BY RAND() LIMIT 100";
-        return $this->prepare ($sql)->resultStr ();
-    }
-
-    public function delete_send_admin ($id)
-    {
-        return $this->prepare ("DELETE FROM `send` WHERE id=$id")->execute ();
-    }
-
-    public function addsponser ($name, $sponser, $link)
-    {
-        $sql = "SELECT * FROM `forejoin` WHERE tag='$sponser'";
-        if ($this->prepare ($sql)->rowCount () == 0) {
-            $sql = "INSERT INTO `forejoin` (`name`,`tag`,`link`) VALUES ('$name','$sponser','$link')";
-            $this->prepare ($sql)->execute ();
-            return true;
-        } else {
-            return false;
-        }
-    }
-
-    public function add_custom_price ($name, $short_name, $prices, $price, $credit, $expire, $description, $inviter_gift, $type, $maxmember)
-    {
-
-        $sql = "INSERT INTO `custom_prices` (`name`,`short_name`,`prices`,`price`,`credit`,`expire`,`description`,`inviter_gift`,`type`,`max_member`) VALUES ('$name','$short_name','$prices',$price,$credit,$expire,'$description',$inviter_gift,'$type',$maxmember)";
-
-        $this->prepare ($sql)->execute ();
-        return true;
-
-    }
-
-    public function add_queapi ($type, $data, $groupid, $msgid, $link, $price)
-    {
-        $sql = "SELECT * FROM `que_api` WHERE link='$link' and status='pending' and groupid='$groupid' and msgid='$msgid'";
-        if ($this->prepare ($sql)->rowCount () == 0) {
-            $time = time ();
-            $sql = "INSERT INTO `que_api` (`type`,`data`,`status`,`groupid`,`msgid`,`link`,`price`,`time`) VALUES ($type,'$data','pending','$groupid','$msgid','$link',$price,'$time')";
-            $this->prepare ($sql)->execute ();
-            return true;
-        }
-
-    }
-
-    public function make_orderid ()
-    {
-
-        $i = rand (1111111111, 9999999999);
-        $newcheck = $this->prepare ("SELECT * FROM account_charge WHERE order_id='$i'")->rowCount ();
-
-        if ($newcheck > 0) {
-            return 0;
-        } else {
-            return $i;
-        }
-
-    }
-
-    public function get_payment_by_order_id ($order_id)
-    {
-
-        if (is_numeric ($order_id)) {
-            return $this->prepare (
-                "SELECT * FROM `account_charge` WHERE order_id=$order_id"
-            )->resultStr ()[0];
-        } else {
-            return [];
-        }
-
-    }
-
-    public function get_user_success_payment ($user_id)
-    {
-        $payment_row = $this->prepare ("SELECT * FROM `account_charge` WHERE user_id=$user_id AND status = 1")->rowCount ();
-        if ($payment_row > 0) {
-            return $this->prepare (
-                "SELECT * FROM `account_charge` WHERE user_id=$user_id AND status = 1 ORDER BY id ASC LIMIT 1"
-            )->resultStr ()[0];
-        } else {
-            return false;
-        }
-    }
-
-    public function add_payment_order ($user_id, $order_id, $plan, $amount, $ip, $description, $extra_info)
-    {
-
-        $time = time ();
-        $sql = "INSERT INTO `account_charge` (`user_id`,`order_id`,`plan`,`amount`,`ip`,`description`,`status`,`time`,`extra_info`) VALUES ('$user_id', '$order_id', '$plan', $amount, '$ip', '$description', 0, '$time', '$extra_info')";
-        $this->prepare ($sql)->execute ();
-        return true;
-
-    }
-
-    public function charge_group ($chat_id, $owner, $credit, $mode = "+")
-    {
-        $sql = "SELECT * FROM `allow_groups` WHERE group_id='$chat_id'";
-        $time = time ();
-        if ($this->prepare ($sql)->rowCount () == 0) {
-            $sql = "INSERT INTO `allow_groups` (`group_id`,`owner`,`credit`,`time`) VALUES ('$chat_id','$owner',$credit,'$time')";
-            $this->prepare ($sql)->execute ();
-            return [true, 0, $credit];
-        } else {
-            $old = $this->get_group ($chat_id)->credit;
-            $sql = "UPDATE `allow_groups` SET credit= credit + $credit WHERE group_id='$chat_id'";
-            if ($mode == "-") {
-                $sql = "UPDATE `allow_groups` SET credit= credit - $credit WHERE group_id='$chat_id'";
-            }
-            $this->prepare ($sql)->execute ();
-            $new = $this->get_group ($chat_id)->credit;
-            return [true, $old, $new];
-        }
-    }
-
-    public function charge_user ($user_id, $amount, $mode = "+")
-    {
-        $sql = "SELECT * FROM `users` WHERE userid='$user_id'";
-        $time = time ();
-        if ($this->prepare ($sql)->rowCount () > 0) {
-            $old = $this->get_user ($user_id)->wallet;
-            $sql = "UPDATE `users` SET wallet= wallet + $amount WHERE userid=$user_id";
-            if ($mode == "-") {
-                $sql = "UPDATE `users` SET wallet= wallet - $amount WHERE userid=$user_id";
-            }
-            $this->prepare ($sql)->execute ();
-            $new = $this->get_user ($user_id)->wallet;
-            return [true, $old, $new];
-        } else {
-            return false;
-        }
-    }
-
-    public function get_group ($chat_id)
-    {
-        $sql = "SELECT * FROM `allow_groups` WHERE group_id='$chat_id'";
-        $results = $this->prepare ($sql)->resultStr ();
-        $return = false;
-        foreach ($results as $row) {
-            $return = $row;
-        }
-        return $return;
-    }
-
-    public function get_group_expired ()
-    {
-        $time = time ();
-        $sql = "SELECT * FROM `allow_groups` WHERE expire <= $time and warn_expire=0";
-        return $this->prepare ($sql)->resultStr ();
-
-    }
-
-    public function get_link_info ($link)
-    {
-        $address_explode = explode ("/", $link);
-        $site_name = $address_explode[2];
-        $site_name = str_replace ("www.", "", $site_name);
-        $file_code = "";
-        $file_name = "";
-        $return = ["file_code" => "UNSET", "file_name" => "UNSET", "site" => "UNSET", "real_site" => "UNSET"];
-        $return["real_site"] = $site_name;
-
-        switch ($site_name) {
-            case "freepik.com":
-                if (strlen ($address_explode[4]) < 5) {
-                    return $return;
-                }
-                
-                
-                $address_explode = explode ("/", explode("#",$link)[0]);
-                $file_code = explode ("_", $address_explode[4]);
-                $file_name = $file_code[0];
-                $file_code = explode (".", $file_code[1])[0];
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                if($address_explode[3] == "premium_video"){
-                    $file_code = explode ("_", $address_explode[4]);
-                    $file_name = $file_code[0];
-                    $file_code = $file_code[1];
-                    $return["file_code"] = $file_code;
-                    $return["file_name"] = $file_name;
-                }
-                break;
-            case "istockphoto.com":
-                if (strlen ($address_explode[4]) < 5) {
-                    return $return;
-                }
-                $file_code = explode ("-", $address_explode[4]);
-                $file_code = $file_code[ count ($file_code) - 1 ];
-                $file_name = explode ("-" . $file_code, $address_explode[4])[0];
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                break;
-            case "elements.envato.com":
-
-                if (count ($address_explode) > 4) {
-                    $file_code = explode ("-", $address_explode[4]);
-                    $file_code = $file_code[ count ($file_code) - 1 ];
-                    $file_name = str_replace ("-" . $file_code, "", $address_explode[4]);
-                } else {
-                    $file_code = explode ("-", $address_explode[3]);
-                    $file_code = $file_code[ count ($file_code) - 1 ];
-                    $file_name = str_replace ("-" . $file_code, "", $address_explode[3]);
-
-                }
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                break;
-            case "flaticon.com":
-                if (strlen ($address_explode[4]) < 5) {
-                    return $return;
-                }
-
-                $file_code1 = explode ("?", $address_explode[4])[0];
-                $file_code = explode ("_", $file_code1);
-                $file_code = $file_code[ count ($file_code) - 1 ];
-                $file_name = str_replace ("_" . $file_code, "", $file_code1);
-
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                break;
-            case "motionarray.com":
-                if (strlen ($address_explode[4]) < 5) {
-                    return $return;
-                }
-
-                $file_code = explode ("-", $address_explode[4]);
-                $file_code = $file_code[ count ($file_code) - 1 ];
-                $file_name = str_replace ("-" . $file_code, "", $address_explode[4]);
-
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                break;
-
-            case "shutterstock.com":
-                if (strlen ($address_explode[4]) < 5) {
-                    return $return;
-                }
-                $file_code = explode ("-", $address_explode[4]);
-                $file_code = $file_code[ count ($file_code) - 1 ];
-                $file_name = str_replace ("-" . $file_code, "", $address_explode[4]);
-
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                break;
-
-            case "stock.adobe.com":
-                if (strlen ($address_explode[5]) < 5) {
-                    return $return;
-                }
-                $file_code = $address_explode[5];
-                $file_code = explode ("?", $file_code)[0];
-                $file_name = $address_explode[4];
-
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                break;
-
-            case "vecteezy.com":
-                if (strlen ($address_explode[4]) < 5) {
-                    return $return;
-                }
-                $file_code = $address_explode[4];
-                $file_code = explode ("-", $file_code)[0];
-                $file_name = str_replace ($file_code . "-", "", $address_explode[4]);
-
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                break;
-            case "dreamstime.com":
-                if (strlen ($address_explode[3]) < 5) {
-                    return $return;
-                }
-                $file_code = explode ("-", $address_explode[3]);
-                $file_code = $file_code[ count ($file_code) - 1 ];
-                $file_name = str_replace ("-" . $file_code, "", $address_explode[3]);
-
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                break;
-
-            default :
-
-                if (count ($address_explode) > 4) {
-                    $file_code = explode ("-", $address_explode[4]);
-                    $file_code = $file_code[ count ($file_code) - 1 ];
-                    $file_name = str_replace ("-" . $file_code, "", $address_explode[4]);
-                } else {
-                    $file_code = explode ("-", $address_explode[3]);
-                    $file_code = $file_code[ count ($file_code) - 1 ];
-                    $file_name = str_replace ("-" . $file_code, "", $address_explode[3]);
-
-                }
-                $return["file_code"] = $file_code;
-                $return["file_name"] = $file_name;
-                break;
-        }
-
-        if ($site_name == "elements.envato.com") {
-            $return["site"] = "envato";
-        } elseif ($site_name == "stock.adobe.com") {
-            $return["site"] = "StockAdobe";
-        } else {
-            $return["site"] = explode (".", $site_name)[0];
-        }
-
-        return $return;
-    }
-
-    public function get_site_status_send ($link)
-    {
-        $address_explode = explode ("/", $link);
-        $site_name = $address_explode[2];
-        $site_name = str_replace ("www.", "", $site_name);
-
-        $sql = "SELECT * FROM `prices` WHERE site='$site_name' LIMIT 1";
-        $results = $this->prepare ($sql)->resultStr ();
-        $return = false;
-        foreach ($results as $row) {
-            $return = $row->count_order_automatic_status;
-        }
-
-        return $return;
-
-    }
-
-    public function get_group_order_price ($site)
-    {
-
-        $sql = "SELECT * FROM `prices` WHERE site='$site' LIMIT 1";
-        $results = $this->prepare ($sql)->resultStr ();
-        $return = false;
-        foreach ($results as $row) {
-            $return = $row;
-        }
-
-        return $return;
-
-    }
-
-    public function get_group_order_price_by_id ($id)
-    {
-
-        $sql = "SELECT * FROM `prices` WHERE id=$id LIMIT 1";
-        $results = $this->prepare ($sql)->resultStr ();
-        $return = false;
-        foreach ($results as $row) {
-            $return = $row;
-        }
-
-        return $return;
-
-    }
-
-    public function get_site_price ($link, $plan)
-    {
-        $address_explode = explode ("/", $link);
-        $site_name = $address_explode[2];
-        $site_name = str_replace ("www.", "", $site_name);
-        $sites = json_decode ($this->get_primes_by_id ($plan)->prices);
-        $price_final = 0;
-
-        foreach ($sites as $site) {
-            if (isset($site->$site_name)) {
-                $price_final = $site->$site_name;
-            }
-        }
-
-        return $price_final;
-    }
-
-    public function get_count_order_site_price ($link)
-    {
-        $address_explode = explode ("/", $link);
-        $site_name = $address_explode[2];
-        $site_name = str_replace ("www.", "", $site_name);
-        $sql = "SELECT * FROM `prices` WHERE site='$site_name'";
-        $results = $this->prepare ($sql)->resultStr ();
-        $return = false;
-        foreach ($results as $row) {
-            $return = $row;
-        }
-
-        return $return;
-    }
-
-    public function get_site_wrong_link_helper ($site_name)
-    {
-
-        $sql = "SELECT * FROM `wrong_link_help` WHERE site='$site_name'";
-        $results = $this->prepare ($sql)->resultStr ();
-        $return = false;
-        foreach ($results as $row) {
-            $return = $row;
-        }
-
-        return $return;
-    }
-
-    public function get_site_price_by_id ($id)
-    {
-        $sql = "SELECT * FROM `prices` WHERE id=$id";
-        $results = $this->prepare ($sql)->resultStr ();
-        $return = false;
-        foreach ($results as $row) {
-            $return = $row;
-        }
-
-        return $return;
-    }
-
-    public function get_site_price_by_name ($name)
-    {
-        $sql = "SELECT * FROM `prices` WHERE site='$name'";
-        $results = $this->prepare ($sql)->resultStr ();
-        $return = false;
-        foreach ($results as $row) {
-            $return = $row;
-        }
-
-        return $return;
-    }
-
-    public function get_pending ()
-    {
-        $sql = "SELECT * FROM `send` ORDER BY `id` DESC LIMIT 10";
-        $results = $this->prepare ($sql)->resultStr ();
-        $array = [];
-        $row = [];
-        foreach ($results as $row) {
-            $textesh = jdate ("m/d H:i", $row->time);
-            $arr = [
-                [
-                    "text" => $row->fa_type,
-                    "callback_data" => "mngproject-" . $row->id,
-                ],
-                [
-                    "text" => $textesh,
-                    "callback_data" => "mngproject-" . $row->id,
-                ],
-                [
-                    "text" => $row->users,
-                    "callback_data" => "mngproject-" . $row->id,
-                ],
-                ["text" => "حذف", "callback_data" => "delproject-" . $row->id],
-            ];
-            array_push ($array, $arr);
-        }
-        return $array;
-    }
-
-    public function get_primes ($type)
-    {
-        $sql = "SELECT * FROM `custom_prices` WHERE type='$type' and show_button='on' ORDER BY `id` DESC LIMIT 10";
-        $results = $this->prepare ($sql)->resultStr ();
-        $array = [];
-        $row = [];
-        foreach ($results as $row) {
-            $array[] = [$row->name];
-        }
-        if ($type == "prime") {
-
-            $array[] = ["بازگشت به منوی اصلی"];
-        } else {
-
-            $array[] = ["بازگشت به منوی قبلی"];
-        }
-        return $array;
-    }
-
-    public function get_primes_by_name ($name)
-    {
-        $sql = "SELECT * FROM `custom_prices` WHERE name='$name' ORDER BY `id` DESC LIMIT 1";
-        $results = $this->prepare ($sql)->resultStr ();
-        if (is_array ($results)) {
-
-            return $results[0];
-        } else {
-            return false;
-        }
-    }
-
-    public function get_primes_by_id ($id)
-    {
-        $sql = "SELECT * FROM `custom_prices` WHERE id='$id' ORDER BY `id` DESC LIMIT 1";
-        $results = $this->prepare ($sql)->resultStr ();
-        if (is_array ($results)) {
-
-            return $results[0];
-        } else {
-            return false;
-        }
-    }
-
-    public function stats ()
-    {
-        $users = $this->prepare ("SELECT * FROM `users`")->rowCount ();
-
-        $groups = $this->prepare ("SELECT * FROM `allow_groups`")->rowCount ();
-        return [$users, $groups];
-    }
-
-    public function insert_s2a (
-        $type,
-        $file_id,
-        $text,
-        $success,
-        $failed,
-        $users,
-        $status,
-        $fa_type,
-        $time,
-        $destionation
-    )
-    {
-        $sql = "INSERT INTO `send` (`type`,`file_id`,`text`,`success`,`failed`,`users`,`status`,`fa_type`,`time`,`destionation`) VALUES ('$type','$file_id','$text',$success,$failed,$users,'$status','$fa_type','$time',$destionation)";
-        $this->prepare ($sql)->execute ();
-        return true;
-    }
-
-    public function add_file (
-        $link,
-        $chat_id,
-        $msg_id,
-        $user_id,
-        $preview,
-        $preview_type
-    )
-    {
-        $link = str_replace ("http://", "https://", $link);
-        $time = time ();
-        $sql = "INSERT INTO `files` (`link`,`chat_id`,`msg_id`,`user_id`,`preview`,`preview_type`,`status`,`time`) VALUES (?,?,?,?,?,?,?,?)";
+$start_text = "😊😊سلام. این ربات فایلیچ است.
+
+❔هر سوال یا مشکلی داشتید به پشتیبانی پیام بدهید. ظرف چند ثانیه پاسخگوی شما خواهم بود.
+
+👨🏻‍💻پشتیبانی: @FileechAdmin";
+$start_btn_text_1 = "گروه فایلیچ پارتی";
+$start_btn_text_2 = "کانال فایلیچ درایو";
+$start_btn_text_3 = "سایر خدمات فایلیچ";
+$start_btn_text_4 = "پشتیبانی";
+$start_btn_text_5 = "🎁 دریافت اعتبار هدیه";
+$start_btn_text_6 = "سفارش اشتراکی فایل";
+$start_btn_text_7 = "سفارش تعدادی فایل";
+$start_btn_text_8 = "درخواست اسپانسری";
+$start_btn_text_9 = "👨‍👦 حساب کاربری";
+$start_btn_text_10 = "سفارش بدون محدودیت فایل";
+$start_btn_text_11 = "بازگشت به منوی اصلی";
+$start_btn_text_12 = "🌟 فایلیچ پرایم (بسته های سفارش فایل با تخفیف)";
+$start_btn_text_13 = "کد دعوت ندارم";
+$start_btn_text_14 = "🗂 سفارش تعدادی فایل";
+$start_btn_text_15 = "🆓 سفارش رایگان فایل";
+$start_btn_text_16 = "💳 شارژ کیف پول";
+$start_btn_text_17 = "🧑🏻‍💻 پشتیبانی";
+$start_btn_text_18 = "🔸سایر خدمات";
+//$start_btn_text_18 = "🌟 فایلیچ داغ (بسته های سفارش فایل ویژه)";
+
+
+$order_submitted_btn_text_1 = "ارسال مجدد لینک";
+$order_submitted_btn_text_2 = "تغییر سایت";
+
+$order_submitted_btn = ["keyboard" =>
+    [
+
+        [$order_submitted_btn_text_1,$order_submitted_btn_text_2],
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+//////////////////////////////////////////////////////////////////////////////////////////////////
+$canceladdmorelinks_inlineKeyboard = ['keyboard' =>
+    [
+        ["انصراف"]
+    ],
+
+    "resize_keyboard" => true
+];
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+$btn_back_to_main_menu_btn = ["keyboard" =>
+    [
+
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+$btn_back_to_last_menu_btn = ["keyboard" =>
+    [
+
+        ["بازگشت به منوی قبلی"]
+    ],
+    "resize_keyboard" => true
+];
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+$btn_pay_buy_prime_btn_1 = "پرداخت آنلاین - کسر از کیف پول";
+$btn_pay_buy_prime_btn = ["keyboard" =>
+    [
+        [$btn_pay_buy_prime_btn_1],
+        ["بازگشت به منوی قبلی"]
+    ],
+    "resize_keyboard" => true
+];
+/////////////////////////////////////////////////////////////////////////////////////////////
+$btn_make_payment_link_text = "کارت به کارت";
+$btn_make_payment_link_btn = ["keyboard" =>
+    [
+        [$btn_make_payment_link_text,$btn_pay_buy_prime_btn_1],
+        ["بازگشت به منوی قبلی"]
+    ],
+    "resize_keyboard" => true
+];
+////////////////////////////////////////////////////////////////////////////////////////////
+
+$response_start_btn_text_17 = "برای ارتباط با پشتیبانی با آیدی زیر در ارتباط باشید\n\n@Fileechadmin";
+
+$start_btn_17_inlineKeyboard = ['inline_keyboard' => [
+    [
+        ['text' => "ارتباط با پشتیبان", 'url' => "https://t.me/Fileechadmin"]
+    ]
+]];
+/////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn = ["keyboard" =>
+    [
+        [$start_btn_text_15],
+        [$start_btn_text_14],
+        [$start_btn_text_12],
+        [$start_btn_text_18],
+        [$start_btn_text_16, $start_btn_text_9],
+        [$start_btn_text_5],
+        [$start_btn_text_17]
+    ],
+    "resize_keyboard" => true
+];
+
+$inviter_btn = ["keyboard" =>
+    [
+        [$start_btn_text_13],
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+
+];
+$order_unlimit_text = "لطفا یک گزینه را انتخاب کنید";
+$order_unlimit_btn = ["keyboard" =>
+    [
+        [$start_btn_text_6, $start_btn_text_7],
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_1_response_text = "🤍گروه فایلیچ پارتی ( سفارش رایگان فایل های پریمیوم از سایت های فری‌پیک، فلت آیکون، انواتو و... )
+
+@FileechParty
+T.me/FileechParty
+
+⚪️ فقط کافیه لینک فایل های مدنظر خود را در گروه ارسال کنید.";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_14_response_text = "
+⚪️در این قسمت به تعداد فایل هایی که نیاز دارید می‌توانید سفارش ثبت کنید.
+
+❕قبل از سفارش فایل می‌بایست موجودی کیف پول خود را در منوی اصلی> شارژ کیف پول، افزایش دهید.
+❕سفارش های تعدادی شما از سایت های فری پیک، انواتو، شاتراستوک و ادوبی استوک، برای دانلود رایگان، به صورت عمومی و محدود، در گروه @FileechParty ارسال می‌شوند. اگر می‌خواهید سفارش فقط برای شما ارسال شود، برای سفارش فایل می‌توانید یکی از بسته های تخفیف‌دار اشتراک فایلیچ پرایم را خریداری کنید. برای اطلاعات بیشتر به منو اصلی> فایلیچ پرایم مراجعه کنید.
+❕سفارش ها به صورت اتوماتیک و آنی ارسال می‌شوند.
+❕درصورتی که سفارش شما به دلیل مشکلات سخت افزاری ربات و یا مشکلاتی که برای اکانت ها پیش می آید ارسال نشود، تیم پشتیبانی در کوتاه ترین زمان ممکن پاسخگوی شما خواهد بود.
+❕اگر سایت موردنظر شما در لیست سایت های پشتیبانی شده موجود نبود، لینک را برای پشتیبانی ارسال کنید.
+❕احتمال کاهش/افزایش تعرفه ها در طول سال وجود دارد.
+
+👨🏼‍💻پشتیبانی: @FileechAdmin
+
+سایت مورد نظر خود را انتخاب کنید:
+";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$there_is_no_accepted_link = "لینک قابل قبول پیدا نشد";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$order_count_level_1_text = "";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$order_count_level_2_text = "
+✅تعداد LINK_COUNT لینک از سایت SITENAME دریافت شد.
+
+FILE_CODES
+";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_2_response_text = "
+[فایلیچ درایو](https://t.me/FileechDrive) خدمتی جدید از [فایلیچ](https://t.me/Fileech) 
+
+            
+⚪️ بزودی...";
+$start_btn_2_response_photo = "AgACAgQAAxkBAAJnIWMVj1orXCnxpqrmKmBIXhKemmw6AAKSuzEbKZqpUPLMle2wpUSnAQADAgADeQADKQQ";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_3_response_text = "
+▫️سفارش فایل از [Freepik.com](https://t.me/Fileech/28)
+▫️سفارش آیکون پک از [Flaticon.com](https://t.me/Fileech/29)
+▫️سفارش فایل از [Motionarray.com](https://t.me/Fileech/94)
+▫️سفارش فایل از [Elements.envato.com](https://t.me/Fileech/64)
+▫️سفارش فایل از [Shutterstock.com](https://t.me/Fileech/102)
+▫️سفارش فایل از [Stock.adobe.com](https://t.me/Fileech/103)
+◽️و کُلی سایت دیگه، برای  اطلاعات بیشتر با من در ارتباط باشید
         
-        try{
-        $this->prepare ($sql);
-        $this->execute ([$link, $chat_id ,$msg_id ,$user_id ,$preview ,$preview_type ,'waiting' ,$time]);
-        return $this->lastInsertId ();  
-        }catch (Exception $e){
-        error_log($sql);
-        error_log("error on add file ".$e);
-        }
-    }
+◻ ️[پشتیبانی](http://t.me/FileechAdmin)
+";
+$start_btn_3_response_photo = "AgACAgQAAxkBAAICTGLO98yTu2gIFfJHE_4Bo5VNwPjEAAI4rjEb_cK9ULXyr0q3PP2rAQADAgADeQADKQQ";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_4_response_text = "
+ارتباط با پشتیبان فایلیچ : @FileechAdmin
+";
+$start_btn_4_response_photo = "AgACAgQAAxkBAAKOumKsfMOrhxtKVw8keFBx3EDJJ94gAAIxrjEbkZeUUlCkNT2KT0f8AQADAgADeQADJAQ";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_5_response_text = "🤍گروه فایلیچ پارتی؛ سفارش رایگان فایل های پریمیوم از سایت های فری‌پیک، فلت آیکون، انواتو و... )
 
-    public function add_file_group (
-        $links,
-        $site,
-        $msg_id,
-        $user_id,
-        $price
-    )
-    {
-        $time = time ();
-        $sql = "INSERT INTO `files_group` (`links`,`site`,`msg_id`,`user_id`,`price`,`status`,`time`) VALUES ('$links',$site,'$msg_id','$user_id',$price,'waiting','$time')";
-        $this->prepare ($sql)->execute ();
-        return $this->lastInsertId ();
-    }
+⚪️ فقط کافیه لینک فایل موردنظر خود را در گروه ارسال کنید. بعد از چند دقیقه لینک دانلود توسط ربات برای شما ارسال می‌شود.
 
-    public function update_files_group_info ($row, $new_data, $id)
-    {
-        $sql = "UPDATE `files_group` SET $row=$new_data WHERE id=$id";
-        return $this->prepare ($sql)->execute ();
-    }
+https://t.me/USERNAME_BOT?start=USERID";
+$start_btn_5_response_btn = ['inline_keyboard' => [
+    [
+        ['text' => "عضویت", 'url' => 'url']
+    ]
+]];
+$start_btn_5_response_reply_text = "با ارسال بنر بالا به دوستانتان ،3 اعتبار هدیه برای ارسال لینک و 10 اعتبار برای دریافت فایل دریافت کنید";
+$start_btn_5_response_photo = "AgACAgQAAxkBAAICYWLO-EVCT3f3BOkBjMYw9NkV8zVSAAJKtTEbHyYQUD8oHmvQYnKjAQADAgADeAADKQQ";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_6_response_text = "
+⭐️ فایلیچ پرایم؛ کیف پول خود را حداقل 90.000 تومان شارژ کنید و فایل های مورد نظر خود را با قیمت های استثنایی، در کمترین زمان ممکن دریافت کنید. بعد از ثبت سفارش، هر بار که لینک ارسال کنید، طبق تعرفه از مبلغ کیف پول شما کم می‌شود.
 
-    public function get_file_group_by_id ($id)
-    {
-        if (is_numeric ($id)) {
-            return $this->prepare (
-                "SELECT * FROM `files_group` WHERE id=$id"
-            )->resultStr ();
-        } else {
-            return [];
-        }
-    }
+🌟لیست برخی از سایت های پشتیبانی شده  :
 
-    public function add_post (
-        $file_id,
-        $type,
-        $caption
-    )
-    {
-        $time = time ();
-        $sql = "INSERT INTO `files` (link,type,download,chat_id,msg_id,user_id,file_id,caption,preview,preview_type,status,time ) VALUES ('UNSET','$type',0,'UNSET','UNSET','UNSET','$file_id','$caption','UNSET','UNSET','sent','$time')";
-        $this->prepare ($sql)->execute ();
-        return $this->lastInsertId ();
-    }
+✨Freepik.com
+✨Shutterstock.com
+✨Elements.envato.com
+✨Motionarray.com
+✨Epidemicsound.com
+✨Istockphoto.com
+✨Vectorstock.com
+✨Stock.adobe.com
+✨Dreamstime.com
+✨Uplabs.com
+✨و کُلی سایت دیگه.
+";
+$start_btn_6_response_photo = "AgACAgQAAxkBAAJnN2MVkCiarM8fDQABkzovAzNZiBwaXAAClLsxGymaqVCtyRpRV9w9DgEAAwIAA3kAAykE";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_7_response_text = "🔘سفارش تعدادی فایل؛ به تعداد فایل هایی که نیاز دارید می‌توانید از سایت های پشتیبانی شده فایل سفارش بدهید.
 
-    public function add_file_pack (
-        $file_type,
-        $file_id,
-        $preview_type,
-        $preview_file,
-        $description,
-        $allow_dl
-    )
-    {
-        $time = time ();
-        $sql = "INSERT INTO `filepacks` (type,file_id,description,preview,preview_type,allow_download,downloaders,time) VALUES ('$file_type','$file_id','$description','$preview_file','$preview_type',$allow_dl,'[]','$time')";
-        $this->prepare ($sql)->execute ();
-        return $this->lastInsertId ();
-    }
+⚪️لیست برخی از سایت های پشتیبانی شده  :
 
-    public function check_exsist_file ($link)
-    {
-        $link = str_replace ("http://", "https://", $link);
+▫[️Freepik.com](http://xn--freepik-4e6d.com)
+▫[️Shutterstock.com](http://xn--shutterstock-f84h.com)
+▫[️Elements.envato.com](http://xn--elements-z53e.envato.com)
+▫[️Motionarray.com](http://xn--motionarray-kh7g.com)
+▫[️Epidemicsound.com](http://xn--epidemicsound-9z2i.com)
+▫[️Istockphoto.com](http://xn--istockphoto-kh7g.com)
+▫[️Vectorstock.com](http://xn--vectorstock-kh7g.com)
+▫[️Stock.adobe.com](http://xn--stock-fv0c.adobe.com)
+▫[️Dreamstime.com](http://xn--dreamstime-pp9f.com)
+▫[️Uplabs.com](http://xn--uplabs-9m8c.com)
+▫️و کُلی سایت دیگه";
+$start_btn_7_response_photo = "AgACAgQAAxkBAAJnMGMVj82mMX3b4r7uNxMhi_itO-nbAAKTuzEbKZqpUA0tA49Z3W6GAQADAgADeQADKQQ";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$txtinlinebtn = '💳اطلاعات بیشتر، مشاهده تعرفه ها و ثبت سفارش';
+$txtinlinebtn2 = '🧑🏻‍💻پشتیبانی';
+$linkbtn = "https://t.me/FileechPayments/7";
+$linkbtn2 = "https://t.me/Fileechadmin";
+$start_btn_6_7_response_inlineKeyboard = ['inline_keyboard' => [
+    [
+        ['text' => $txtinlinebtn, 'url' => $linkbtn]
+    ],
+    [
+        ['text' => $txtinlinebtn2, 'url' => $linkbtn2]
+    ]
+]];
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_8_response_text = "
+اگر شما کانال/گروه تلگرامی مرتبط با خدمات فایلیچ دارید، می‌تونید اسپانسر خدمات رایگان فایلیچ بشوید.
 
-        $sql = "SELECT * FROM `files` WHERE link='$link' AND file_id IS NOT NULL";
-        if ($this->prepare ($sql)->rowCount () < 1) {
-            return true;
-        } else {
-            $results = $this->prepare ($sql)->resultStr ();
-            foreach ($results as $row) {
-                return [
-                    $row->id,
-                    $row->preview,
-                    $row->preview_type,
-                    $row->status,
-                ];
-            }
-        }
-    }
-    
-        public function get_files_open_by_chat_id ($chat_id)
-    {
-        return $this->prepare (
-            "SELECT * FROM `files` WHERE chat_id='$chat_id' and status='sending'"
-        )->rowCount ();
+بعد از آنکه شما اسپانسر فایلیچ شدید، کاربر ها برای ارسال لینک در [گروه فایلیچ پارتی](http://t.me/FileechParty) و همچنین دانلود فایل از [گروه فایلیچ پارتی](http://t.me/FileechParty)  و کانال [فایلیچ پک](http://t.me/FileechPacks) ، می‌بایست در گروه/کانال شما عضو شوند. 
 
+هزینه: ۱۳۰.۰۰۰ تومان برای یک هفته (شنبه تا پنجشنبه)";
+$response_8_btn_1_text = 'ثبت درخواست اسپانسری';
+$response_8_btn_1_link = "https://t.me/FileechAdmin";
+$start_btn_8_response_keyboard = ['inline_keyboard' => [
+    [
+        ['text' => $response_8_btn_1_text, 'url' => $response_8_btn_1_link]
+    ]
+]];
 
-    }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$photo_btn_12_response_photo = 'https://fileechbot.ir/FPF46.jpg';
+$start_btn_12_response_text = '🌟 با خرید یکی از بسته های تخفیف دار سفارش فایل، کاربر فایلیچ پرایم خواهید شد و با مبلغی که بابت خرید هر بسته پرداخت خواهید کرد، طبق تعرفه های درج شده در تصویر پیوست شده، می‌توانید از سایت های پشتیبانی شده به صورت مستقیم و آنی فایل سفارش بدهید.
 
-    public function get_file_by_id_and_user ($id, $user)
-    {
-        $return = false;
+🟡بعد از خرید هر یک از بسته ها، می‌بایست یک گروه شخصی ایجاد کنید و ربات فایلیچ را در آن ادمین کنید، با این کار:
+✨می‌توانید دوستان و همکاران خود را در گروه عضو کنید و به صورت گروهی فایل سفارش بدهید. درضمن ربات میزان استفاده هر کاربر را محاسبه خواهد کرد.
 
-        $res = $this->prepare (
-            "SELECT * FROM `files` WHERE id=$id and user_id=$user and status='sent'"
-        )->resultStr ();
-        foreach ($res as $result) {
-            $return = $result;
-        }
+💸[ درصورت عدم نمایش تصویر مقایسه تعرفه ها، اینجا کلیک کنید](https://fileechbot.ir/FPF46.jpg)
 
-        return $return;
+⚡️[ فیلم نحوه سفارش فایل و سرعت ارسال ربات](https://telegra.ph/Fileech-Prime-10-29)
 
-    }
+🔸سفارش ها بصورت فایل تلگرام و لینک دانلود مستقیم برای شما ارسال می‌شوند.
 
-    public function get_file_by_id ($id)
-    {
-        if (is_numeric ($id)) {
-            return $this->prepare (
-                "SELECT * FROM `files` WHERE id=$id"
-            )->resultStr ();
-        } else {
-            return false;
-        }
-    }
+🌟همچنین با خرید اشتراک فایلیچ پرایم،  در کنار دانلود آنی فایل از سایت های پشتیبانی شده، می‌توانید:
 
-    public function get_file_by_msg_id ($msg_id, $chat_id)
-    {
-        return $this->prepare (
-            "SELECT * FROM `files` WHERE msg_id = '$msg_id' and chat_id='$chat_id'"
-        )->resultStr ();
-    }
+🎉فایل های گروه @FileechParty را بدون محدودیت دانلود کنید (آرشیو سفارش های رایگان ربات)
 
-    public function get_file_by_link ($link)
-    {
-        return $this->prepare (
-            "SELECT * FROM `files` WHERE link = '$link'"
-        )->resultStr ();
-    }
+📦پک های کانال @FileechPacks را بدون محدودیت دانلود کنید.
 
-    public function get_file_compeleted_by_link ($link)
-    {
-        return $this->prepare (
-            "SELECT * FROM `files` WHERE link = '$link' and status='sent' and file_id IS NOT NULL"
-        )->resultStr ();
-    }
+🔽برای خرید اشتراک فایلیچ پرایم، یکی از بسته های زیر را انتخاب کنید:
+    ';
 
-    public function update_group ($col, $new_data, $where_1, $where_2)
-    {
-        $sql = "UPDATE `allow_groups` SET $col=$new_data WHERE $where_1=$where_2";
-        return $this->prepare ($sql)->execute ();
-    }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_18_response_text = 'یکی از خدمات زیر را انتخاب کنید';
 
-    public function update_file_info ($row, $new_data, $id)
-    {
-        $sql = "UPDATE `files` SET $row=? WHERE id=$id";
-        $this->prepare ($sql);
-        $this->execute ([$new_data]);
-    }
+$start_btn_18_response_btn_1 = "پیشنهاد های ویژه";
+$start_btn_18_response_btn_2 = "فایلیچ پارتی";
+$start_btn_18_response_btn_3 = "فایلیچ پک";
 
-    public function update_file_info_by_link ($row, $new_data, $link)
-    {
-        $sql = "UPDATE `files` SET $row=$new_data WHERE link='$link'";
-        return $this->prepare ($sql)->execute ();
-    }
+$start_btn_18_response_keyboard = ["keyboard" =>
+    [
+        [$start_btn_18_response_btn_1],
+        [$start_btn_18_response_btn_2,$start_btn_18_response_btn_3],
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_18_response_btn_1_text = "پیشنهاد های ویژه فایلیچ";
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-    public function update_file ($link, $type, $file_id, $caption, $ext)
-    {
-        $sql = "UPDATE `files` SET type='$type',file_id='$file_id',caption='$caption',status='sent',ext='$ext' WHERE link='$link'";
-        $this->prepare ($sql)->execute ();
-        return $this->lastInsertId ();
-    }
+$payment_response_btn_1_text = 'خرید اشتراک';
+$payment_response_keyboard = ['inline_keyboard' => [
+    [
+        ['text' => $payment_response_btn_1_text, 'url' => NULL]
+    ]
+]];
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_9_response_text = "
+یوزر آیدی : USERID
+موجودی کیف پول : CREDIT
+";
+$start_btn_9_response_btn_1 = "لیست پرداخت ها";
 
-    public function update_file_download ($id)
-    {
-        $sql = "UPDATE `files` SET download=download + 1 WHERE id='$id'";
-        return $this->prepare ($sql)->execute ();
-    }
+$start_btn_9_response_btn_2 = "لیست فایل ها";
 
-}
+$start_btn_9_response_keyboard = ["keyboard" =>
+    [
+        [$start_btn_9_response_btn_1],
+        [$start_btn_9_response_btn_2],
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_15_response_text = "لطفا یک گزینه را انتخاب کنید";
+$start_btn_15_response_btn_1 = "سفارش رایگان فایل";
+$start_btn_15_response_btn_3 = "افزایش اعتبار رایگان";
 
+$start_btn_15_response_keyboard = ["keyboard" =>
+    [
+        [$start_btn_15_response_btn_1],
+        [$start_btn_15_response_btn_3],
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_15_response_btn_1_text = "⚪️ جهت بررسی عملکرد ربات، می‌توانید یک فایل به صورت رایگان از سایت های زیر دانلود کنید: 
+🔸 Freepik.com
+🔸 Elements.envato.com 
+🔸 Pngtree.com 
+
+❗️نمونه لینک قابل قبول توسط ربات:
+✅ https://Freepik.com/...
+❌ https://de.Freepik.com/...
+
+✅ https://elements.envato.com/...
+❌ https://elements.envato.com/de/...
+
+✅ https://pngtree.com/...
+❌ https://de.pngtree.com/...
+
+
+(زبان سایت حتما انگلیسی باشد)
+
+▫️یک لینک ارسال کنید:";
+
+$start_btn_15_response_btn_1_keyboard = ["keyboard" =>
+    [
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_18_response_btn_2_photo = "AgACAgQAAxkBAAEB65hj_hKhu0fnHjGnjiSlI2hBeM3AwgACbLoxG1bq8VO0M_o1RnoxywEAAwIAA3kAAy4E";
+$start_btn_18_response_btn_2_text = "🔶دانلود رایگان فایل های موجود در آرشیو ربات فایلیچ...
+
+🎉در گروه فایلیچ پارتی.
+
+🔸عضویت: 
+@FileechParty";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_18_response_btn_3_photo = "AgACAgQAAxkBAAEDyopklrdx9SZUE8F2cofKyavzMvIxmAACI7oxG56ZOFBF5flqztQlygEAAwIAA3kAAy8E";
+$start_btn_18_response_btn_3_text = "📦کانال فایلیچ پک | دانلود پکیج های فایل اختصاصی فایلیچ.
+
+▫️عضویت:
+@FileechPacks";
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_15_response_btn_3_text = "⏺ اعتبار سفارش رایگان فعلی: FREE_ORDER
+
+🔼 به ازای هر 1 کاربر که با لینک زیر وارد ربات بشوند، 1 اعتبار سفارش رایگان فایل از فری‌پیک و انواتو به شما تعلق خواهد گرفت.
+
+🔗 LINK";
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_15_response_btn_1_text = "⚪️ جهت بررسی عملکرد ربات، می‌توانید یک فایل به صورت رایگان از سایت های زیر دانلود کنید: 
+🔸 Freepik.com
+🔸 Elements.envato.com 
+🔸 Pngtree.com 
+
+❗️نمونه لینک قابل قبول توسط ربات:
+✅ https://Freepik.com/...
+❌ https://de.Freepik.com/...
+
+✅ https://elements.envato.com/...
+❌ https://elements.envato.com/de/...
+
+✅ https://pngtree.com/...
+❌ https://de.pngtree.com/...
+
+
+(زبان سایت حتما انگلیسی باشد)
+
+▫️یک لینک ارسال کنید:";
+
+$start_btn_15_response_btn_1_keyboard = ["keyboard" =>
+    [
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+$free_order_invalid_link_text = "لطفا یک لینک معتبر ارسال کنید";
+$free_order_invalid_site_text = "
+⚪️ جهت بررسی عملکرد ربات، می‌توانید یک فایل از سایت های Freepik.com یا Elements.envato.com سفارش بدهید.
+
+❗️نمونه لینک قابل قبول توسط ربات:
+✅ Freepik.com/...
+❌ de.Freepik.com/...
+
+✅ elements.envato.com/...
+❌ elements.envato.com/de/...
+
+(زبان سایت حتما انگلیسی باشد)
+
+▫️یک لینک ارسال کنید:";
+$free_order_text = "✅تعداد LINK_COUNT لینک از سایت SITENAME دریافت شد.
+
+FILE_CODES
+
+❕برای دریافت فایل، دکمه ثبت سفارش رایگان را انتخاب کنید.
+";
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$start_btn_5_response_text = "
+کد دعوت شما : <code>INVITER_CODE</code>
+
+درصورتی که کاربری با وارد کردن کد دعوت فوق، یکی از بسته های اشتراک فایلیچ پرایم را خریداری کنید، مبلغ 30.000 تومان به موجودی کیف پول شما در ربات افزوده خواهد شد.
+
+کاربر دعوت شده نیز 15.000 تومان دریافت خواهد کرد.";
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$error_generate_payment_link_text = "
+💳مبلغ را به شماره کارت زیر واریز کنید و رسید را برای پشتیبانی ارسال کنید.
+
+💳 <code>6219861905080387</code>
+
+👤 محسن جلیلی دوآبی
+
+➖➖➖➖➖➖
+
+پشتیبانی: @FileechAdmin";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$payment_link_generated_text = "
+💸لینک پرداخت شما به مبلغ  PRICE تومان ایجاد شد.
+
+❗️پس از انجام عملیات پرداخت، لطفا تا نمایش نتیجه پرداخت صفحه را نبندید.
+
+🔗لینک پرداخت شما :
+PAYMENT_LINK
+
+❕اگر پرداخت اینترنتی برای شما میسر نیست، برای دریافت شماره کارت به پشتیبانی پیام بدهید.
+
+👨🏻‍💻پشتیبانی: @FileechAdmin
+";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$invalid_inviter_code_text = "کد معرف وارد شده ، نامعتبر است";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$inviter_code_not_exists_text = "کد معرف وارد شده ، وجود ندارد";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$success_submit_inviter_code_text = "کد معرف با موفقیت ثبت شد";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$enter_numeric_amount_charge_text = "لطفا مبلغ موردنظر را بصورت عددی وارد کنید";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$enter_valid_amount_charge_text = "حداقل مبلغ مجاز 10000 تومان می‌باشد.";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$enter_inviter_code_text = "
+ با وارد کردن کد دعوت، بعد از خرید و فعال سازی اشتراک مبلغ 15,000 تومان به کیف پول شما اضافه خواهد شد.
+
+❔راهنمای پیدا کردن کد دعوت:
+https://telegra.ph/invite-12-21
+
+🔽در صورتی که کد دعوت دارید، وارد کنید:
+";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$enter_amount_charge_text = "
+با موجودی کیف پول خود می‌توانید در قسمت سفارش تعدادی فایل، به تعداد فایل هایی که از سایت های پشتیبانی شده نیاز دارید، سفارش ثبت کنید. و یا در قسمت فایلیچ پرایم بسته خریداری کنید.
+
+مبلغ مورد نظر برای شارژ کیف پول را به صورت عددی وارد کنید:
+";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$enter_amount_charge_keyboard = ["keyboard" =>
+    [
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$account_status_text = '
+📤اعتبار باقیمانده ارسال لینک : ALLOW_LINK لینک
+📥اعتبار باقیمانده دانلود فایل : ALLOW_FILE فایل
+
+❕توجه:
+- اعتبار شما به صورت هفتگی تمدید خواهد شد.
+- با انتخاب دکمه "دریافت اعتبار هدیه" می‎توانید اعتبار خود را افزایش بدهید.';
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$get_order_text = "🤍 سلام، سفارش شما دریافت شد.
+
+⚪️در حال آماده سازی لینک دانلود رایگان برای شما هستیم، آماده سازی لینک دانلود ممکن است چند دقیقه و یا چند ساعت زمان ببرد، لطفا صبور باشید.
+⚪️بعد از آماده سازی، لینک دانلود به صورت یک دکمه شیشه ای در پایین این پیام نمایان می شود.
+
+
+⬜️درصورتی که به فایلی نیاز فوری دارید می توانید با قیمت بسیار مناسب به تعداد فایل هایی که نیاز دارید سفارش ثبت کنید:
+[🌟سفارش اشتراکی فایل (با تخفیف و شرایط ویژه)](https://t.me/fileechbot?start=prime)
+[⚪️سفارش تعدادی فایل](https://t.me/fileechbot?start=orderquantity)
+
+[⚪️پشتیبانی](http://t.me/fileechadmin";
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$get_order_single_text_admin = "سفارش جدید از USER
+یوزر آیدی :
+OPENCHAT
+گروه :
+GROUP
+------------------
+لینک :
+LINK
+زمان :
+DATE
+کد پیگیری :
+#REFID
+کد فایل :
+<code>FILECODE</code>
+نام فایل :
+<code>FILENAME</code>
+
+";////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$get_order_group_text_admin = "سفارش جدید از USER
+
+لینک ها :
+LINKS
+زمان :
+DATE
+کد پیگیری :
+#REFID
+";
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+$allow_send_link_limit = '
+❕اعتبار شما برای ارسال لینک به پایان رسید.
+
+شما میتوانید با انتخاب دکمه "دریافت اعتبار هدیه" و دعوت دوستان، به ازای هر عضویت 1 اعتبار برای ارسال لینک دریافت کنید.
+همچنین اعتبار دانلود شما بصورت هفتگی تمدید خواهد شد.
+';
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$allow_download_link_limit = '
+❕اعتبار شما برای دانلود فایل به پایان رسید.
+
+شما میتوانید با انتخاب دکمه "دریافت اعتبار هدیه" و دعوت دوستان، به ازای هر عضویت 1 اعتبار برای دانلود فایل دریافت کنید.
+همچنین اعتبار دانلود شما بصورت هفتگی تمدید خواهد شد.
+';
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$txtinlinebtn = '📥 دانلود این فایل';
+$txtinlinebtn2 = '🌟 سفارش اشتراکی فایل (با تخفیف و شرایط ویژه)';
+$txtinlinebtn3 = '⚪️ سفارش تعدادی فایل';
+$txtinlinebtn4 = 'پشتیبانی';
+$linkbtn = "DOWNLOAD_LINK";
+$linkbtn2 = "https://t.me/Fileech/149";
+$linkbtn3 = "https://t.me/Fileech/148";
+$linkbtn4 = "http://t.me/fileechadmin";
+$download_file_response_inlineKeyboard = ['inline_keyboard' => [
+    [
+        ['text' => $txtinlinebtn, 'url' => $linkbtn]
+    ],
+    [
+        ['text' => $txtinlinebtn2, 'url' => $linkbtn2]
+    ],
+    [
+        ['text' => $txtinlinebtn3, 'url' => $linkbtn3]
+    ],
+    [
+        ['text' => $txtinlinebtn4, 'url' => $linkbtn4]
+    ]
+]];
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$join_text = "سلام ، جهت ادامه عضو کانال های زیر شوید";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$enter_number_text = "لطفا شماره خود را از طریق دکمه زیر به اشتراک بگذارید
+
+کاربر عزیز؛ توجه داشته باشید دریافت شماره صرفا برای حصول اطمینان از ایرانی بود کاربر ها و جلوگیری از افراد سودجو می‌باشد. این اطمینان را به شما می‌دهیم که از شماره شما هیچ‌گونه استفاده نادرستی (تبلیغات، مزاحمت و...) نخواهد شد.
+";
+$enter_number_btn = ["keyboard" =>
+    [
+        [['text' => "ارسال شماره", 'request_contact' => true]]
+    ],
+    "resize_keyboard" => true
+];
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$please_share_with_btn_text = "لطفا از طریق دکمه زیر اقدام به ارسال شماره تماس خود کنید";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$false_iranian_number_text = "کاربر گرامی ، برای جلوگیری از افراد سود جو ، تنها شماره های ایرانی توانایی استفاده از خدمات را دارند.";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$notify_reward_text = "تبریک ! اعتبار هدیه برای ارسال لینک و دانلود فایل بابت معرفی کاربر به شما تعلق گرفت";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$verify_compelete_text = "تبریک ، حساب شما با موفقیت تایید شد!";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+$confirm_link_single_text = "💸با سفارش این فایل مبلغ PRICE از اعتبار بسته پرایم شما کسر خواهد شد.
+➖➖
+▫️کد فایل :
+FILE_CODE
+▫️نام فایل :
+FILE_NAME
+
+➖➖➖➖
+
+🎁30.000 تومان هدیه برای کاربران پرایم؛ برای دریافت هدیه وارد ربات فایلیچ بشید و دکمه دریافت اعتبار هدیه رو انتخاب کنید.
+
+👨🏼‍💻پشتیبانی: @FileechAdmin
+";
+
+$confirm_link_single_inlineKeyboard = ['inline_keyboard' => [
+    [
+        ['text' => "ثبت سفارش", 'callback_data' => "null"]
+    ]
+]];
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+$confirm_link_group_text = "تعداد لینک ها : LINKS_COUNT
+
+LINKS
+
+هزینه دریافت فایل ها :‌
+PRICE تومان
+
+❕توجه داشته باشید که بعد از انتخاب گزینه ثبت درخواست، امکان عودت اعتبار وجود ندارد و مبلغ از حساب شما کسر خواهد شد.";
+
+$confirm_link_group_inlineKeyboard = ['inline_keyboard' => [
+    [
+        ['text' => "ثبت درخواست", 'callback_data' => "null"]
+    ]
+]];
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$invalid_site_text = "این سایت پشتیبانی نمیشود
+لینک ارسال شده توسط شما : ";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$invalid_content_text = "کاربر گرامی ، شما فقط مجاز به ارسال لینک در گروه هستید";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$low_group_charge_text = "اعتبار شما برای ثبت سفارش کافی نمی‌باشد. برای خرید بسته جدید وارد ربات @FileechBot بشید، دکمه فایلیچ پرایم را انتخاب کنید.
+
+بعد از خرید بسته دستور زیر را در گروه ارسال کنید:
+
+/upgrade
+";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$unallowable_group_text = "این گروه فاقد اشتراک میباشد\n\nبرای خرید اشتراک به ربات @fileechbot مراجعه کنید و پس از ارسال دستور\n/start\n دکمه فایلیچ پرایم را انتخاب کنید";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$unallowable_member_count = "تعداد اعضای گروه بیش از حد مجاز است\n حداکثر تعداد مجاز اعضا گروه باید MAXMEMBER عضو به همراه ربات باشد";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$cant_send_some_link_text = "❕ در حال حاضر امکان ثبت سفارش تعدادی در ربات وجود ندارد. اگر قصد ارسال تعداد زیادی لینک را دارید، در قالب یک فایل نوت برای ادمین ارسال کنید.
+
+👨🏼‍💻@FileechAdmin";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$error_on_get_link_text = "⚪️سفارش شما با موفقیت ثبت شد.
+
+اگر بعد از 10 ثانیه سفارش شما ارسال نشد، دکمه زیر را را انتخاب کنید.";
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$use_fileech_party_text = "
+❕محدودیت اکانت شما برای سفارش رایگان به اتمام رسید.
+
+🔥پیشنهاد ویژه برای شما: با پرداخت 160.000 تومان و خرید اشتراک پرایم می‌توانبد:
+🔵128 فایل از فری پیک
+🟢42 فایل از انواتو 
+🔴22 فایل از شاتراستوک دانلود کنید
+
+🤖برای مشاهده سایر سایت های پشتیبانی شده و دریافت اطلاعات بیشتر، در منوی اصلی ربات دکمه فایلیچ پرایم را انتخاب کنید.
+";
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$low_wallet_balance_text = "❕موجودی کیف پول شما برای خرید بسته VIP کافی نیست. 
+
+▫️در منو اصلی ربات دکمه شارژ کیف پول را انتخاب کنید و موجودی کیف پول خود را به میزان مبلغ بسته شارژ کنید.";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$limited_allow_download_text = "محدودیت دانلود رایگان این پک به اتمام رسید، جهت دانلود نامحدود پک  های موجود در کانال @FileechPacks می‌توانید یکی از بسته های فایلیچ پرایم را خریداری کنید.";
+
+$limited_allow_download_btn = ["keyboard" =>
+    [
+        [$start_btn_text_12],
+        [$start_btn_text_11]
+    ],
+    "resize_keyboard" => true
+];
+
+
+$expired_prime_text = "❕مدت زمان استفاده از بسته پرایم شما به اتمام رسید، با خرید بسته جدید، موجودی باقی مانده به اعتبار بسته جدید افزوده خواهد شد.
+
+👨🏻‍💻پشتیبانی: @FileechAdmin";
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+$txtinlinebtn = 'گروه را ارتقا بده';
+$normal_gp_response_inlineKeyboard = ['inline_keyboard' => [
+    [
+        ['text' => $txtinlinebtn, 'callback_data' => "/upgrade"]
+    ]
+]];
+
+///////////////////////////////////////////////////////////
+$txtinlinebtn1 = 'بروزرسانی بسته';
+$txtinlinebtn2 = 'تنظیم محدودیت اعتبار';
+$txtinlinebtn3 = 'تنظیم محدودیت زمانی';
+$txtinlinebtn4 = 'تنظیم نحوه ثبت سفارش';
+$txtinlinebtn5 = 'لیست سایت ها';
+$txtinlinebtn6 = 'ایجاد بازی';
+$txtinlinebtn7 = 'اعتبار هدیه';
+$callback_btn1 = "/upgrade";
+$prime_response_callback_btn2 = "setlimit-credit_0";
+$callback_btn3 = "setlimit-time_0";
+$callback_btn4 = "set_ordertype";
+$callback_btn5 = "sitelist";
+$callback_btn6 = "creategame";
+$callback_btn7 = "giftcredit";
+
+
+$prime_response_inlineKeyboard = ['inline_keyboard' => [
+    [
+        ['text' => $txtinlinebtn1, 'callback_data' => $callback_btn1]
+    ],
+    [
+        ['text' => $txtinlinebtn2, 'callback_data' => $prime_response_callback_btn2],['text' => $txtinlinebtn3, 'callback_data' => $callback_btn3]
+    ],
+    [
+        ['text' => $txtinlinebtn4, 'callback_data' => $callback_btn4]
+    ],
+    [
+        ['text' => $txtinlinebtn5, 'callback_data' => $callback_btn5],['text' => $txtinlinebtn6, 'callback_data' => $callback_btn6]
+    ],
+    [
+        ['text' => $txtinlinebtn7, 'callback_data' => $callback_btn7]
+    ]
+]];
+
+$success_pay_text = "با تشکر اعتماد شما.
+
+برای فعال سازی ربات و سفارش فایل، مراحل زیر را با دقت و به ترتیب انجام بدهید.
+
+۱.  ابتدا یک گروه ایجاد کنید، سپس تنظیمات گروه را باز کنید و 
+Chat history for now members
+را انتخاب کنید، سپس گزینه Visible را انتخاب کنید.
+
+۲. از طریق لینک زیر ربات @Fileechbot را عضو گروه کنید و دسترسی ادمین را به ربات بدهید.
+https://t.me/fileechbot?startgroup=inpvbtn&admin=delete_messages+restrict_members+invite_users
+
+۳.دستور /upgrade را در گروه ارسال کنید.
+(تایپ: ابتدا / سپس upgrade)
+
+تبریک ، اکنون میتوانید با ارسال لینک از سایت های پشتیبانی شده در گروه از ربات و اعتبار خود استفاده نمایید
+
+👨🏼‍💻اگر نتوانستید مراحل بالا را انجام بدهید، برای دریافت راهنمایی به پشتیبانی پیام بدهید: @FileechAdmin"
 ?>
